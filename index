@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>预约系统 · 用户端</title>
+    <!-- Bootstrap 5 简洁样式 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: #f4f7fc; }
+        .card-shadow { box-shadow: 0 8px 20px rgba(0,0,0,0.05); border: none; }
+        .time-hint { background: #e8f0fe; padding: 8px 12px; border-radius: 20px; font-size: 0.9rem; }
+        .footer-note { font-size: 0.85rem; color: #6c757d; }
+    </style>
+</head>
+<body class="py-4">
+
+<div class="container">
+    <div class="text-center mb-4">
+        <h2 class="fw-bold text-primary">📅 轻松预约 · 用户端</h2>
+        <p class="text-muted">填写表单选择时段，可随时查看已被预约的时间</p>
+    </div>
+
+    <div class="row g-4">
+        <!-- 左侧：预约表单 -->
+        <div class="col-lg-5">
+            <div class="card card-shadow rounded-4 p-3">
+                <div class="card-body">
+                    <h5 class="card-title mb-3"><i class="bi bi-pencil-square"></i> 新建预约</h5>
+                    <form id="bookingForm">
+                        <div class="mb-3">
+                            <label class="form-label">姓名</label>
+                            <input type="text" class="form-control" id="name" placeholder="例如：张三" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">联系电话</label>
+                            <input type="tel" class="form-control" id="phone" placeholder="手机号码" required>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">预约日期</label>
+                                <input type="date" class="form-control" id="date" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">预约时间</label>
+                                <input type="time" class="form-control" id="time" required>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">服务项目</label>
+                            <select class="form-select" id="service" required>
+                                <option value="" disabled selected>-- 请选择 --</option>
+                                <option value="理发">💇 理发</option>
+                                <option value="美容">💆 美容</option>
+                                <option value="咨询">📋 咨询</option>
+                                <option value="维修">🔧 维修</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">备注 (选填)</label>
+                            <textarea class="form-control" id="notes" rows="2" placeholder="特殊要求..."></textarea>
+                        </div>
+
+                        <div class="time-hint mb-3" id="selectedDateHint">
+                            <span class="fw-light">📌 请先选择日期，查看已约时段</span>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary w-100 py-2">提交预约</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧：所有已预约时段 (公开仅显示日期+时间) -->
+        <div class="col-lg-7">
+            <div class="card card-shadow rounded-4">
+                <div class="card-body">
+                    <h5 class="card-title mb-3"><i class="bi bi-clock-history"></i> 当前已预约时段 (公开)</h5>
+                    <div class="mb-2 text-secondary small">仅显示已被占用的日期和时间，保护隐私</div>
+                    <div id="publicSlotsContainer" style="max-height: 400px; overflow-y: auto;">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>日期</th>
+                                    <th>时间</th>
+                                    <th>服务</th>
+                                </tr>
+                            </thead>
+                            <tbody id="publicSlotsBody">
+                                <tr><td colspan="3" class="text-center text-muted">加载中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-3 text-end footer-note">
+                <a href="admin.html" target="_blank" class="text-decoration-none">⚙️ 前往管理端 (需密码)</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 后端 API 基础地址 (根据实际情况修改)
+    const API_BASE = 'http://localhost:3000/api';  // 例如：http://your-server.com/api
+
+    // 全局存储公共时段数据，用于快速提示
+    let publicAppointments = [];
+
+    // 获取公共时段并渲染表格
+    async function loadPublicSlots() {
+        try {
+            const response = await fetch(`${API_BASE}/appointments`);
+            if (!response.ok) throw new Error('加载失败');
+            publicAppointments = await response.json();  // 预期格式: [{date, time, service}]
+            renderPublicSlots(publicAppointments);
+            updateSelectedDateHint();  // 更新当前日期的提示
+        } catch (error) {
+            document.getElementById('publicSlotsBody').innerHTML = `<tr><td colspan="3" class="text-center text-danger">加载失败，请刷新重试</td></tr>`;
+            console.error(error);
+        }
+    }
+
+    // 渲染公共时段表格
+    function renderPublicSlots(slots) {
+        const tbody = document.getElementById('publicSlotsBody');
+        if (!slots || slots.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="3" class="text-center text-muted">暂无预约数据</td></tr>`;
+            return;
+        }
+        // 按日期时间排序
+        const sorted = [...slots].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+        let html = '';
+        sorted.forEach(item => {
+            html += `<tr>
+                <td>${escapeHtml(item.date)}</td>
+                <td>${escapeHtml(item.time)}</td>
+                <td>${escapeHtml(item.service || '—')}</td>
+            </tr>`;
+        });
+        tbody.innerHTML = html;
+    }
+
+    // 更新选定日期的已约时段提示
+    function updateSelectedDateHint() {
+        const dateInput = document.getElementById('date');
+        const selectedDate = dateInput.value;
+        const hintEl = document.getElementById('selectedDateHint');
+        if (!selectedDate) {
+            hintEl.innerHTML = `<span class="fw-light">📌 请先选择日期</span>`;
+            return;
+        }
+        const slotsOnDate = publicAppointments.filter(item => item.date === selectedDate);
+        if (slotsOnDate.length === 0) {
+            hintEl.innerHTML = `<span class="text-success">✅ 所选日期 ${selectedDate} 目前全天空闲</span>`;
+        } else {
+            const times = slotsOnDate.map(item => item.time).sort();
+            const timesStr = times.join('  ·  ');
+            hintEl.innerHTML = `<span class="text-warning-dark">⏰ 所选日期已有预约： ${timesStr}</span>`;
+        }
+    }
+
+    // 提交新预约
+    async function submitBooking(formData) {
+        try {
+            const response = await fetch(`${API_BASE}/appointments`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(formData)
+            });
+            if (response.status === 409) {
+                // 冲突
+                const result = await response.json();
+                alert(result.error || '该时段已被预约');
+                return false;
+            }
+            if (!response.ok) {
+                const err = await response.json();
+                alert(err.error || '提交失败，请稍后重试');
+                return false;
+            }
+            const result = await response.json();
+            if (result.success) {
+                alert('预约成功！');
+                // 重新加载公共时段
+                await loadPublicSlots();
+                return true;
+            } else {
+                alert('预约失败：' + (result.error || '未知错误'));
+                return false;
+            }
+        } catch (error) {
+            alert('网络错误，请检查后端服务是否正常');
+            console.error(error);
+            return false;
+        }
+    }
+
+    // 简单转义
+    function escapeHtml(unsafe) {
+        if (!unsafe) return '';
+        return String(unsafe)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    // 设置默认日期为今天
+    function setDefaultDate() {
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        document.getElementById('date').value = `${yyyy}-${mm}-${dd}`;
+    }
+
+    // 页面初始化
+    document.addEventListener('DOMContentLoaded', () => {
+        setDefaultDate();
+        loadPublicSlots();
+
+        const form = document.getElementById('bookingForm');
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const name = document.getElementById('name').value.trim();
+            const phone = document.getElementById('phone').value.trim();
+            const date = document.getElementById('date').value;
+            const time = document.getElementById('time').value;
+            const service = document.getElementById('service').value;
+            const notes = document.getElementById('notes').value.trim();
+
+            if (!name || !phone || !date || !time || !service) {
+                alert('请完整填写所有必填项');
+                return;
+            }
+
+            // 提交前可以再次快速检查本地缓存中是否有冲突（避免不必要的请求）
+            if (publicAppointments.some(item => item.date === date && item.time === time)) {
+                alert('该时段已被预约，请选择其他时间');
+                return;
+            }
+
+            const formData = { name, phone, date, time, service, notes };
+            const success = await submitBooking(formData);
+            if (success) {
+                // 清空表单（保留服务默认未选中）
+                document.getElementById('name').value = '';
+                document.getElementById('phone').value = '';
+                document.getElementById('time').value = '';
+                document.getElementById('service').value = '';
+                document.getElementById('notes').value = '';
+            }
+        });
+
+        document.getElementById('date').addEventListener('change', updateSelectedDateHint);
+    });
+</script>
+
+<!-- Bootstrap Icons (可选) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+</body>
+</html>
